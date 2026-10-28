@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>XAUUSD Layer Risk Calculator</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root { font-family: Inter, system-ui, sans-serif; color: #edf5ff; background: #08111f; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    .page { min-height: 100vh; padding: 30px 20px; background: radial-gradient(circle at 15% 5%, #254c75 0, transparent 35%), #08111f; }
+    .shell { width: min(1100px, 100%); margin: auto; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
+    .brand { display: flex; gap: 12px; align-items: center; }
+    .logo { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; background: linear-gradient(135deg, #5a91ff, #55d7bd); color: #06101c; font-weight: 900; }
+    h1 { margin: 0; font-size: 27px; } .muted { margin-top: 4px; color: #91a7c1; font-size: 13px; }
+    .nav { display: flex; flex-wrap: wrap; gap: 14px; } .nav a { color: #a9c5ff; text-decoration: none; font-size: 14px; }
+    .panel { padding: 24px; border: 1px solid #203b5b; border-radius: 20px; background: rgba(13, 28, 48, .9); box-shadow: 0 20px 70px rgba(0,0,0,.25); }
+    .settings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+    label { display: block; color: #c6d4e5; font-size: 12px; font-weight: 700; margin-bottom: 7px; }
+    input, select { width: 100%; padding: 11px 12px; border: 1px solid #304763; border-radius: 9px; background: #0a182b; color: #fff; outline: none; font-size: 14px; }
+    input:focus, select:focus { border-color: #5c9bff; box-shadow: 0 0 0 3px rgba(92,155,255,.16); }
+    .layers { overflow-x: auto; }
+    table { width: 100%; min-width: 690px; border-collapse: collapse; }
+    th, td { padding: 12px 10px; border-bottom: 1px solid #203b5b; text-align: left; }
+    th { color: #9db5d0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    td { font-size: 14px; }
+    .table-input { min-width: 115px; }
+    .result { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+    .metric { padding: 16px; border: 1px solid #294967; border-radius: 13px; background: #0a182b; }
+    .metric span { display: block; color: #91a7c1; font-size: 12px; } .metric strong { display: block; margin-top: 5px; font-size: 22px; }
+    .saved { margin-top: 28px; }
+    .saved-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .saved-header h2 { margin: 0; font-size: 19px; }
+    .save-row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+    .save-button, .clear-button { padding: 11px 16px; border: 0; border-radius: 9px; font-weight: 800; cursor: pointer; }
+    .save-button { color: #06101c; background: linear-gradient(135deg, #5a91ff, #55d7bd); }
+    .clear-button { color: #ffb4bf; background: transparent; border: 1px solid #6d3543; }
+    .save-button:hover, .clear-button:hover { filter: brightness(1.08); }
+    .saved-empty { padding: 18px; color: #8198b3; border: 1px dashed #294461; border-radius: 10px; font-size: 13px; }
+    .profit { color: #8df0ce; font-weight: 700; } .loss { color: #ffabb7; font-weight: 700; }
+    .delete-row { padding: 6px 9px; border: 1px solid #6d3543; border-radius: 7px; color: #ffabb7; background: transparent; cursor: pointer; }
+    @media (max-width: 760px) { .settings { grid-template-columns: repeat(2, 1fr); } .result { grid-template-columns: 1fr; } .topbar { align-items: flex-start; flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useMemo, useState } = React;
+
+    function Calculator() {
+      const [direction, setDirection] = useState("SELL");
+      const [stopLoss, setStopLoss] = useState("4017");
+      const [balance, setBalance] = useState("60");
+      const [contractSize, setContractSize] = useState("100");
+      const [pipSize, setPipSize] = useState("0.01");
+      const [resultType, setResultType] = useState("Loss");
+      const [savedSetups, setSavedSetups] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("xauusdSavedSetups") || "[]"); }
+        catch { return []; }
+      });
+      const [layers, setLayers] = useState([
+        { entry: "4004", lots: "0.01" },
+        { entry: "4004.40", lots: "0.02" },
+        { entry: "4004.70", lots: "0.03" },
+        { entry: "", lots: "" }
+      ]);
+
+      const updateLayer = (index, key, value) => {
+        setLayers(old => old.map((layer, i) => i === index ? { ...layer, [key]: value } : layer));
+      };
+
+      const calculation = useMemo(() => {
+        const sl = Number(stopLoss) || 0;
+        const rows = layers.map((layer, index) => {
+          const entry = Number(layer.entry);
+          const lots = Number(layer.lots);
+          const valid = Number.isFinite(entry) && entry > 0 && Number.isFinite(lots) && lots > 0;
+          if (!valid) return { index, entry: 0, lots: 0, distance: 0, pips: 0, loss: 0, valid: false };
+          const distance = Math.abs(sl - entry);
+          return {
+            index,
+            entry,
+            lots,
+            distance,
+            pips: distance / Number(pipSize || 0.01),
+            loss: distance * Number(contractSize || 100) * lots,
+            valid: true
+          };
+        });
+        const totalLots = rows.reduce((sum, row) => sum + row.lots, 0);
+        const totalLoss = rows.reduce((sum, row) => sum + row.loss, 0);
+        const account = Number(balance) || 0;
+        const riskPercent = account ? totalLoss / account * 100 : 0;
+        const expectedSide = direction === "SELL" ? sl > rows.find(r => r.valid)?.entry : sl < rows.find(r => r.valid)?.entry;
+        return { rows, totalLots, totalLoss, riskPercent, expectedSide };
+      }, [layers, stopLoss, balance, contractSize, pipSize, direction]);
+
+      const saveSetup = () => {
+        if (calculation.totalLots <= 0) return;
+        const setup = {
+          id: Date.now(),
+          direction,
+          resultType,
+          estimated: calculation.totalLoss,
+          lots: calculation.totalLots
+        };
+        const next = [...savedSetups, setup];
+        setSavedSetups(next);
+        localStorage.setItem("xauusdSavedSetups", JSON.stringify(next));
+      };
+
+      const deleteSetup = (id) => {
+        const next = savedSetups.filter(setup => setup.id !== id);
+        setSavedSetups(next);
+        localStorage.setItem("xauusdSavedSetups", JSON.stringify(next));
+      };
+
+      const clearSetups = () => {
+        setSavedSetups([]);
+        localStorage.removeItem("xauusdSavedSetups");
+      };
+
+      return (
+        <main className="page">
+          <div className="shell">
+            <header className="topbar">
+              <div className="brand"><div className="logo">XR</div><div><h1>XAUUSD Layer Risk Calculator</h1><div className="muted">Calculate estimated loss for up to four entries</div></div></div>
+
+            </header>
+            <section className="panel">
+              <div className="settings">
+                <div><label>Direction</label><select value={direction} onChange={e => setDirection(e.target.value)}><option>SELL</option><option>BUY</option></select></div>
+                <div><label>Stop Loss price</label><input type="number" step="0.01" value={stopLoss} onChange={e => setStopLoss(e.target.value)} /></div>
+                <div><label>Account balance (USD)</label><input type="number" step="0.01" value={balance} onChange={e => setBalance(e.target.value)} /></div>
+                <div><label>Contract size / lot</label><input type="number" step="1" value={contractSize} onChange={e => setContractSize(e.target.value)} /></div>
+                <div><label>Result type</label><select value={resultType} onChange={e => setResultType(e.target.value)}><option>Loss</option><option>Profit</option></select></div>
+              </div>
+              <div className="layers">
+                <table>
+                  <thead><tr><th>Layer</th><th>Entry price</th><th>Lots</th><th>Distance to SL</th><th>Distance (pips)</th><th>Estimated loss</th></tr></thead>
+                  <tbody>{calculation.rows.map((row, index) => <tr key={index}><td>Layer {index + 1}</td><td><input className="table-input" type="number" step="0.01" value={layers[index].entry} onChange={e => updateLayer(index, "entry", e.target.value)} placeholder="e.g. 4004" /></td><td><input className="table-input" type="number" min="0" step="0.001" value={layers[index].lots} onChange={e => updateLayer(index, "lots", e.target.value)} placeholder="e.g. 0.01" /></td><td>{row.valid ? row.distance.toFixed(2) : "—"}</td><td>{row.valid ? row.pips.toFixed(1) : "—"}</td><td>{row.valid ? `USD ${row.loss.toFixed(2)}` : "—"}</td></tr>)}</tbody>
+                </table>
+              </div>
+              <div className="result"><div className="metric"><span>Total lots</span><strong>{calculation.totalLots.toFixed(3)}</strong></div><div className="metric"><span>Estimated total loss</span><strong>USD {calculation.totalLoss.toFixed(2)}</strong></div><div className="metric"><span>Risk vs balance</span><strong>{calculation.riskPercent.toFixed(2)}%</strong></div></div>
+              {calculation.totalLoss > Number(balance || 0) && <div className="warning">Warning: estimated loss is greater than the account balance. Actual results may also include spread, commission, slippage and broker stop-out rules.</div>}
+              {calculation.totalLoss > 0 && !calculation.expectedSide && <div className="warning">Check the direction and Stop Loss. For SELL, the Stop Loss is normally above entry; for BUY, it is normally below entry.</div>}
+              <div className="note">Assumption: loss = absolute price distance × contract size × lots. Confirm the XAUUSD contract size and pip definition in your broker's symbol specification before trading. This calculator is for estimation, not financial advice.</div>
+              <div className="save-row"><button className="save-button" onClick={saveSetup} disabled={calculation.totalLots <= 0}>Save Setup</button></div>
+              <section className="saved">
+                <div className="saved-header"><h2>Saved Setups</h2>{savedSetups.length > 0 && <button className="clear-button" onClick={clearSetups}>Clear All</button>}</div>
+                {savedSetups.length === 0 ? <div className="saved-empty">No setup saved yet. Complete the layers above and click <strong>Save Setup</strong>.</div> : <div className="layers"><table><thead><tr><th>No</th><th>Direction</th><th>Profit / Loss</th><th>Estimated (USD)</th><th>Lot Size</th><th>Action</th></tr></thead><tbody>{savedSetups.map((setup, index) => <tr key={setup.id}><td>{index + 1}</td><td>{setup.direction}</td><td className={setup.resultType === "Profit" ? "profit" : "loss"}>{setup.resultType}</td><td>USD {setup.estimated.toFixed(2)}</td><td>{setup.lots.toFixed(3)}</td><td><button className="delete-row" onClick={() => deleteSetup(setup.id)}>Delete</button></td></tr>)}</tbody></table></div>}
+              </section>
+            </section>
+          </div>
+        </main>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById("root")).render(<Calculator />);
+  </script>
+</body>
+</html>

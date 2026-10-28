@@ -1,0 +1,7 @@
+services:
+  xauusd-calculator:
+    build: .
+    container_name: xauusd-calculator
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
